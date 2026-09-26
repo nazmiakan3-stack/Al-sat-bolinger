@@ -1,0 +1,18 @@
+# Binance Futures API (sadece Futures Trade yetkisi ver)
+BINANCE_API_KEY=buraya_api_key
+BINANCE_API_SECRET=buraya_api_secret
+
+# Bot ayarları
+SYMBOL=XAGUSDT
+TIMEFRAME=15m
+QUANTITY=0.01          # Her işlemde açılacak miktar (XAG)
+LEVERAGE=5             # Kaldıraç (dikkatli ol)
+RSI_LENGTH=14
+RSI_OVERBOUGHT=65
+RSI_OVERSOLD=35
+BB_LENGTH=20
+BB_STD=2.0
+COOLDOWN_BARS=4        # 15m için 1 saat civarı
+PAPER_MODE=true        # true = sadece log, false = gerçek emir
+TELEGRAM_BOT_TOKEN=    # opsiyonel
+TELEGRAM_CHAT_ID=      # opsiyonel
