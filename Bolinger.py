@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-XAGUSDT Bollinger + RSI Bot
+Multi-Asset Bollinger + RSI Bot
 Binance Futures | 15m | Paper Mode | Leverage 20x
-Sanal pozisyon + Gerçek fiyat + TP %2 / SL %5 + Grafik
+10 Assets (Crypto, Gold, Silver) | TradingView-style Charts with Highs/Lows
 """
 
 import os
@@ -15,14 +15,19 @@ import pandas as pd
 import ta
 import requests
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import mplfinance as mpf  # TradingView-style charts
 from io import BytesIO
 
 load_dotenv()
 
 # ==================== AYARLAR ====================
-SYMBOL          = os.getenv("SYMBOL", "XAGUSDT")
+# İşlem yapılacak varlıklar (8 Kripto + Gümüş + Altın)
+SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
+    "ARBUSDT", "DOGEUSDT", "XRPUSDT", "MATICUSDT",
+    "XAUUSDT", "XAGUSDT"
+]
 TIMEFRAME       = os.getenv("TIMEFRAME", "15m")
 NOTIONAL_USDT   = float(os.getenv("NOTIONAL_USDT", "50"))
 LEVERAGE        = int(os.getenv("LEVERAGE", "20"))
@@ -39,12 +44,18 @@ TG_CHAT         = os.getenv("TELEGRAM_CHAT_ID", "")
 TP_PCT = 0.02
 SL_PCT = 0.05
 
-# Sanal cüzdan
-paper_balance = 200.0
-paper_side = None
-paper_qty = 0.0
-paper_entry = 0.0
-paper_margin = 0.0
+# Sanal cüzdan ve pozisyon bilgileri (her varlık için ayrı)
+class PaperPosition:
+    def __init__(self, initial_balance=200.0):
+        self.balance = initial_balance
+        self.side = None
+        self.qty = 0.0
+        self.entry = 0.0
+        self.margin = 0.0
+        self.last_signal_bar = None
+
+# Varlık bazlı pozisyon takibi
+paper_positions = {symbol: PaperPosition() for symbol in SYMBOLS}
 
 # ==================== LOGGING ====================
 logging.basicConfig(
@@ -72,26 +83,52 @@ def send_telegram(text: str, photo_bytes: bytes = None):
         log.warning(f"Telegram hatası: {e}")
 
 # ==================== GRAFİK ====================
-def create_chart(df: pd.DataFrame, signal: str, entry_price: float) -> bytes:
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={"height_ratios": [3, 1]})
-
-    ax1.plot(df["timestamp"], df["close"], label="Close", color="black", linewidth=1.2)
-    ax1.plot(df["timestamp"], df["bb_upper"], label="BB Upper", color="red", alpha=0.7)
-    ax1.plot(df["timestamp"], df["bb_middle"], label="BB Mid", color="gray", alpha=0.7)
-    ax1.plot(df["timestamp"], df["bb_lower"], label="BB Lower", color="green", alpha=0.7)
-    ax1.fill_between(df["timestamp"], df["bb_upper"], df["bb_lower"], color="blue", alpha=0.08)
-    ax1.axhline(entry_price, color="orange", linestyle="--", linewidth=1.5, label=f"Entry {entry_price:.2f}")
-    ax1.set_title(f"XAGUSDT 15m | {signal} | Entry: {entry_price:.2f} | Leverage 20x (PAPER)", fontsize=12)
-    ax1.legend(loc="upper left", fontsize=9)
-    ax1.grid(True, alpha=0.3)
-
-    ax2.plot(df["timestamp"], df["rsi"], color="purple", label="RSI")
-    ax2.axhline(RSI_OB, color="red", linestyle="--", alpha=0.7)
-    ax2.axhline(RSI_OS, color="green", linestyle="--", alpha=0.7)
-    ax2.axhline(50, color="gray", linestyle=":", alpha=0.5)
-    ax2.set_ylim(0, 100)
-    ax2.legend(loc="upper left", fontsize=9)
-    ax2.grid(True, alpha=0.3)
+def create_chart(symbol: str, df: pd.DataFrame, signal: str, entry_price: float) -> bytes:
+    # `mplfinance` için DataFrame'i hazırla
+    plot_df = df.set_index("timestamp")
+    
+    # Tepe ve dip noktalarını belirle
+    highs = plot_df[plot_df["high"] == plot_df["high"].rolling(10, center=True).max()]["high"]
+    lows = plot_df[plot_df["low"] == plot_df["low"].rolling(10, center=True).min()]["low"]
+    
+    # Grafiği oluştur (mplfinance)
+    mc = mpf.make_marketcolors(up='#17cf2d', down='#ff2e2e', inherit=True)
+    s  = mpf.make_mpf_style(base_mpf_style='nightclouds', marketcolors=mc)
+    
+    # Addplot ile tepe ve dip noktalarını ekle
+    ap_plots = [
+        mpf.make_addplot(highs, type='scatter', color='lime', marker='^', markersize=10),
+        mpf.make_addplot(lows, type='scatter', color='tomato', marker='v', markersize=10)
+    ]
+    
+    fig, axlist = mpf.plot(plot_df, type='candle', style=s,
+                            addplot=ap_plots,
+                            title=f"{symbol} 15m | {signal} | Entry: {entry_price:.2f} | Leverage 20x (PAPER)",
+                            ylabel='Price', ylabel_lower='RSI',
+                            volume=False, # Hacim grafiği eklemek isterseniz True yapın
+                            panel_ratios=(3, 1), # Fiyat ve RSI panelleri arası oran
+                            show_nontrading=False,
+                            returnfig=True)
+    
+    # Fiyat grafiğine Bollinger bantlarını ekle
+    ax_price = axlist[0]
+    ax_price.plot(df["bb_upper"], label="BB Upper", color="red", alpha=0.7)
+    ax_price.plot(df["bb_middle"], label="BB Mid", color="gray", alpha=0.7)
+    ax_price.plot(df["bb_lower"], label="BB Lower", color="green", alpha=0.7)
+    ax_price.fill_between(range(len(df)), df["bb_upper"], df["bb_lower"], color="blue", alpha=0.08)
+    ax_price.axhline(entry_price, color="orange", linestyle="--", linewidth=1.5, label=f"Entry {entry_price:.2f}")
+    ax_price.legend(loc="upper left", fontsize=9)
+    ax_price.grid(True, alpha=0.3)
+    
+    # RSI paneline RSI çizgisini ve eşiklerini ekle
+    ax_rsi = axlist[2]
+    ax_rsi.plot(df["rsi"], color="purple", label="RSI")
+    ax_rsi.axhline(RSI_OB, color="red", linestyle="--", alpha=0.7)
+    ax_rsi.axhline(RSI_OS, color="green", linestyle="--", alpha=0.7)
+    ax_rsi.axhline(50, color="gray", linestyle=":", alpha=0.5)
+    ax_rsi.set_ylim(0, 100)
+    ax_rsi.legend(loc="upper left", fontsize=9)
+    ax_rsi.grid(True, alpha=0.3)
 
     plt.tight_layout()
     buf = BytesIO()
@@ -108,8 +145,8 @@ def create_exchange():
     })
 
 # ==================== DATA ====================
-def fetch_ohlcv(exchange, limit=100):
-    ohlcv = exchange.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=limit)
+def fetch_ohlcv(exchange, symbol, limit=100):
+    ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=limit)
     df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
     return df
@@ -136,139 +173,139 @@ def check_signal(df):
 def calculate_qty(price: float) -> float:
     return round(NOTIONAL_USDT / price, 3)
 
-def open_paper_position(side: str, price: float, df: pd.DataFrame):
-    global paper_side, paper_qty, paper_entry, paper_margin, paper_balance
-
+def open_paper_position(symbol: str, side: str, price: float, df: pd.DataFrame):
+    pos = paper_positions[symbol]
+    
     qty = calculate_qty(price)
     margin = NOTIONAL_USDT / LEVERAGE          # 50 / 20 = 2.5 USDT
 
-    paper_side = side
-    paper_qty = qty
-    paper_entry = price
-    paper_margin = margin
+    pos.side = side
+    pos.qty = qty
+    pos.entry = price
+    pos.margin = margin
 
-    chart = create_chart(df.tail(60), side, price)
+    chart = create_chart(symbol, df.tail(60), side, price)
 
     msg = (
-        f"<b>{'🟢 LONG' if side == 'LONG' else '🔴 SHORT'} SANAL AÇILDI</b>\n\n"
-        f"Sembol: <code>{SYMBOL}</code>\n"
+        f"<b>[{symbol}] {'🟢 LONG' if side == 'LONG' else '🔴 SHORT'} SANAL AÇILDI</b>\n\n"
         f"Giriş Fiyatı: <b>{price:.2f}</b>\n"
-        f"Miktar: {qty} XAG\n"
+        f"Miktar: {qty} {symbol.split('USDT')[0]}\n"
         f"Notional: {NOTIONAL_USDT} USDT\n"
         f"Kaldıraç: <b>20x</b> (Isolated)\n"
         f"Kullanılan Marjin: {margin:.2f} USDT\n"
         f"TP: +%{TP_PCT*100:.0f} | SL: -%{SL_PCT*100:.0f}\n\n"
-        f"Sanal Cüzdan: <b>{paper_balance:.2f} USDT</b>\n"
+        f"Sanal Cüzdan: <b>{pos.balance:.2f} USDT</b>\n"
         f"Zaman: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     send_telegram(msg, chart)
-    log.info(f"[PAPER] {side} açıldı | Entry: {price:.2f} | Qty: {qty} | Margin: {margin:.2f}")
+    log.info(f"[{symbol}] [PAPER] {side} açıldı | Entry: {price:.2f} | Qty: {qty} | Margin: {margin:.2f}")
 
-def check_tp_sl(current_price: float) -> str | None:
+def check_tp_sl(symbol: str, current_price: float) -> str | None:
     """TP veya SL’ye değdi mi?"""
-    global paper_side, paper_entry
-    if not paper_side:
+    pos = paper_positions[symbol]
+    if not pos.side:
         return None
 
-    if paper_side == "LONG":
-        tp = paper_entry * (1 + TP_PCT)
-        sl = paper_entry * (1 - SL_PCT)
+    if pos.side == "LONG":
+        tp = pos.entry * (1 + TP_PCT)
+        sl = pos.entry * (1 - SL_PCT)
         if current_price >= tp:
             return "TP"
         if current_price <= sl:
             return "SL"
     else:  # SHORT
-        tp = paper_entry * (1 - TP_PCT)
-        sl = paper_entry * (1 + SL_PCT)
+        tp = pos.entry * (1 - TP_PCT)
+        sl = pos.entry * (1 + SL_PCT)
         if current_price <= tp:
             return "TP"
         if current_price >= sl:
             return "SL"
     return None
 
-def close_paper_position(current_price: float, reason: str):
-    global paper_side, paper_qty, paper_entry, paper_margin, paper_balance
-
-    if not paper_side:
+def close_paper_position(symbol: str, current_price: float, reason: str):
+    pos = paper_positions[symbol]
+    
+    if not pos.side:
         return
 
     # PnL hesapla
-    if paper_side == "LONG":
-        pnl = (current_price - paper_entry) * paper_qty
+    if pos.side == "LONG":
+        pnl = (current_price - pos.entry) * pos.qty
     else:
-        pnl = (paper_entry - current_price) * paper_qty
+        pnl = (pos.entry - current_price) * pos.qty
 
-    paper_balance += pnl
+    pos.balance += pnl
 
     msg = (
-        f"<b>{'🟢' if pnl >= 0 else '🔴'} SANAL POZİSYON KAPANDI</b>\n\n"
-        f"Yön: {paper_side}\n"
-        f"Giriş: {paper_entry:.2f}\n"
+        f"<b>[{symbol}] {'🟢' if pnl >= 0 else '🔴'} SANAL POZİSYON KAPANDI</b>\n\n"
+        f"Yön: {pos.side}\n"
+        f"Giriş: {pos.entry:.2f}\n"
         f"Çıkış: {current_price:.2f}\n"
         f"Sebep: <b>{reason}</b>\n"
         f"Kar/Zarar: <b>{pnl:+.2f} USDT</b>\n\n"
-        f"Yeni Sanal Cüzdan: <b>{paper_balance:.2f} USDT</b>"
+        f"Yeni Sanal Cüzdan: <b>{pos.balance:.2f} USDT</b>"
     )
     send_telegram(msg)
-    log.info(f"[PAPER] {paper_side} kapandı ({reason}) | PnL: {pnl:+.2f} | Bakiye: {paper_balance:.2f}")
+    log.info(f"[{symbol}] [PAPER] {pos.side} kapandı ({reason}) | PnL: {pnl:+.2f} | Bakiye: {pos.balance:.2f}")
 
-    paper_side = None
-    paper_qty = 0.0
-    paper_entry = 0.0
-    paper_margin = 0.0
+    pos.side = None
+    pos.qty = 0.0
+    pos.entry = 0.0
+    pos.margin = 0.0
 
 # ==================== ANA DÖNGÜ ====================
 def main():
     log.info("=" * 60)
-    log.info(f"PAPER BOT BAŞLADI | {SYMBOL} 15m | Leverage 20x | Notional {NOTIONAL_USDT} USDT")
-    log.info(f"Başlangıç Sanal Cüzdan: 200 USDT")
+    log.info(f"MULTI-ASSET PAPER BOT STARTED | Pairs: {', '.join(SYMBOLS)}")
+    log.info(f"Base Balance: 200 USDT per Asset (2000 USDT total)")
     log.info("=" * 60)
     send_telegram(
-        f"🤖 <b>Sanal Bot Başladı</b>\n"
-        f"{SYMBOL} | 15m | Kaldıraç 20x\n"
+        f"🤖 <b>Multi-Asset Sanal Bot Başladı</b>\n"
+        f"{', '.join(SYMBOLS)}\n"
         f"Notional: {NOTIONAL_USDT} USDT\n"
-        f"Başlangıç Cüzdan: <b>200 USDT</b>\n"
+        f"Başlangıç Cüzdan: <b>200 USDT per Asset</b>\n"
         f"Mod: <b>PAPER (Sanal)</b>"
     )
 
     exchange = create_exchange()
-    last_signal_bar = None
 
     while True:
         try:
-            df = fetch_ohlcv(exchange)
-            df = add_indicators(df)
-            current_bar = df.iloc[-2]["timestamp"]
-            price = float(df.iloc[-1]["close"])  # anlık fiyat
-            signal = check_signal(df)
+            for symbol in SYMBOLS:
+                pos = paper_positions[symbol]
+                df = fetch_ohlcv(exchange, symbol)
+                df = add_indicators(df)
+                current_bar = df.iloc[-2]["timestamp"]
+                price = float(df.iloc[-1]["close"])  # anlık fiyat
+                signal = check_signal(df)
 
-            # 1) Açık pozisyon varsa TP/SL kontrol et
-            if paper_side:
-                hit = check_tp_sl(price)
-                if hit:
-                    close_paper_position(price, hit)
+                # 1) Açık pozisyon varsa TP/SL kontrol et
+                if pos.side:
+                    hit = check_tp_sl(symbol, price)
+                    if hit:
+                        close_paper_position(symbol, price, hit)
 
-            # 2) Yeni sinyal
-            can_trade = True
-            if last_signal_bar is not None:
-                bars = (current_bar - last_signal_bar).total_seconds() / (15 * 60)
-                if bars < COOLDOWN:
-                    can_trade = False
+                # 2) Yeni sinyal
+                can_trade = True
+                if pos.last_signal_bar is not None:
+                    bars = (current_bar - pos.last_signal_bar).total_seconds() / (15 * 60)
+                    if bars < COOLDOWN:
+                        can_trade = False
 
-            if signal and can_trade and not paper_side:
-                open_paper_position(signal, float(df.iloc[-2]["close"]), df)
-                last_signal_bar = current_bar
+                if signal and can_trade and not pos.side:
+                    open_paper_position(symbol, signal, float(df.iloc[-2]["close"]), df)
+                    pos.last_signal_bar = current_bar
 
-            # Periyodik log
-            now = datetime.now(timezone.utc)
-            if now.minute % 15 == 0 and now.second < 20:
-                status = paper_side or "Yok"
-                log.info(f"Durum | Fiyat: {price:.2f} | RSI: {df.iloc[-1]['rsi']:.1f} | Pozisyon: {status} | Cüzdan: {paper_balance:.2f}")
+                # Periyodik log
+                now = datetime.now(timezone.utc)
+                if now.minute % 15 == 0 and now.second < 20:
+                    status = pos.side or "None"
+                    log.info(f"[{symbol}] Status | Price: {price:.2f} | RSI: {df.iloc[-1]['rsi']:.1f} | Position: {status} | Wallet: {pos.balance:.2f}")
 
             time.sleep(20)
 
         except Exception as e:
-            log.exception(f"Hata: {e}")
+            log.exception(f"Error for {symbol}: {e}")
             time.sleep(30)
 
 if __name__ == "__main__":
