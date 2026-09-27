@@ -255,16 +255,22 @@ def close_paper_position(symbol: str, current_price: float, reason: str):
 
 # ==================== ANA DÖNGÜ ====================
 def main():
+    # Dosya adını otomatik olarak alıyoruz
+    script_name = os.path.basename(__file__)
+    
     log.info("=" * 60)
-    log.info(f"MULTI-ASSET PAPER BOT STARTED | Pairs: {', '.join(SYMBOLS)}")
+    log.info(f"MULTI-ASSET PAPER BOT STARTED [{script_name}] | Pairs: {', '.join(SYMBOLS)}")
     log.info(f"Base Balance: 200 USDT per Asset (2000 USDT total)")
     log.info("=" * 60)
+    
+    # Telegram mesajına dosya adını ekledik
     send_telegram(
-        f"🤖 <b>Multi-Asset Sanal Bot Başladı</b>\n"
-        f"{', '.join(SYMBOLS)}\n"
-        f"Notional: {NOTIONAL_USDT} USDT\n"
-        f"Başlangıç Cüzdan: <b>200 USDT per Asset</b>\n"
-        f"Mod: <b>PAPER (Sanal)</b>"
+        f"🤖 <b>Multi-Asset Sanal Bot Başladı</b>\n\n"
+        f"📁 <b>Çalışan Dosya:</b> <code>{script_name}</code>\n"
+        f"📈 <b>Varlıklar:</b> {', '.join(SYMBOLS)}\n"
+        f"💰 <b>Notional:</b> {NOTIONAL_USDT} USDT\n"
+        f"💼 <b>Cüzdan:</b> 200 USDT (Her Varlık İçin)\n"
+        f"⚙️ <b>Mod:</b> PAPER (Sanal)"
     )
 
     exchange = create_exchange()
