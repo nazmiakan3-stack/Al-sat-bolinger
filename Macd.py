@@ -13,7 +13,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # ======================== AYARLAR ========================
-# Token ve Chat ID'yi komut satırı argümanlarından alıyoruz
 if len(sys.argv) > 2:
     TELEGRAM_TOKEN = sys.argv[1]
     TELEGRAM_CHAT_ID = sys.argv[2]
@@ -103,11 +102,8 @@ def find_all_signals(df):
         vol_max = window["volume"].max()
         vol_min = window["volume"].min()
 
-        # SHORT
         if current["dif"] > 0 and current["volume"] >= vol_max * 0.98:
             signals.append((df.index[i], "SHORT"))
-
-        # LONG
         elif current["dea"] < 0 and current["volume"] <= vol_min * 1.02:
             signals.append((df.index[i], "LONG"))
 
@@ -170,20 +166,6 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
             zorder=6
         )
 
-    from matplotlib.lines import Line2D
-    legend_elements = [
-        Line2D([0], [0], color="#00d4ff", lw=1.6, label="Fiyat"),
-        Line2D([0], [0], color="#ffd700", lw=1.2, label="EMA 9"),
-        Line2D([0], [0], color="#ff6b6b", lw=1.2, label="EMA 21"),
-        Line2D([0], [0], color="#4ecdc4", lw=1.2, label="EMA 50"),
-        Line2D([0], [0], marker="^", color="w", markerfacecolor="#00ff99",
-               markersize=10, label="LONG", linestyle="None"),
-        Line2D([0], [0], marker="v", color="w", markerfacecolor="#ff4444",
-               markersize=10, label="SHORT", linestyle="None"),
-    ]
-    ax_price.legend(handles=legend_elements, loc="upper left", facecolor="#2a2a2a",
-                    labelcolor="white", fontsize=8, framealpha=0.85)
-
     ax_price.set_ylabel("Fiyat", color="#cccccc")
     ax_price.set_title(
         f"{symbol_name}  |  1 Dakika  |  {datetime.now().strftime('%d.%m.%Y %H:%M')}",
@@ -197,22 +179,17 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
     ax_rsi.plot(df.index, df["rsi"], color="#e040fb", linewidth=1.4)
     ax_rsi.axhline(70, color="#ef5350", linestyle="--", alpha=0.7)
     ax_rsi.axhline(30, color="#26a69a", linestyle="--", alpha=0.7)
-    ax_rsi.axhline(50, color="#666666", linestyle=":", alpha=0.5)
     ax_rsi.set_ylim(0, 100)
     ax_rsi.set_ylabel("RSI", color="#cccccc")
-    ax_rsi.fill_between(df.index, 70, 100, color="#ef5350", alpha=0.08)
-    ax_rsi.fill_between(df.index, 0, 30, color="#26a69a", alpha=0.08)
 
-    ax_macd.plot(df.index, df["dif"], color="#00bcd4", linewidth=1.3, label="DIF")
-    ax_macd.plot(df.index, df["dea"], color="#ff9800", linewidth=1.3, label="DEA")
+    ax_macd.plot(df.index, df["dif"], color="#00bcd4", linewidth=1.3)
+    ax_macd.plot(df.index, df["dea"], color="#ff9800", linewidth=1.3)
     hist_colors = ["#26a69a" if h >= 0 else "#ef5350" for h in df["hist"]]
     ax_macd.bar(df.index, df["hist"], color=hist_colors, width=0.0007, alpha=0.7)
     ax_macd.axhline(0, color="#555555", linewidth=0.8)
-    ax_macd.legend(loc="upper left", facecolor="#2a2a2a", labelcolor="white",
-                   fontsize=8, framealpha=0.8)
     ax_macd.set_ylabel("MACD", color="#cccccc")
-
     ax_macd.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    
     plt.setp(ax_price.get_xticklabels(), visible=False)
     plt.setp(ax_vol.get_xticklabels(), visible=False)
     plt.setp(ax_rsi.get_xticklabels(), visible=False)
@@ -228,7 +205,6 @@ def process_symbol(name, ticker):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {name} kontrol ediliyor...")
     df = get_data(ticker)
     if df is None:
-        print("  → Veri alınamadı")
         return
 
     df = calculate_indicators(df)
@@ -239,36 +215,60 @@ def process_symbol(name, ticker):
     caption = (
         f"<b>{name}</b>\n"
         f"Fiyat: <b>{last['close']:.2f}</b>\n"
-        f"RSI: {last['rsi']:.1f}  |  DIF: {last['dif']:.4f}  |  DEA: {last['dea']:.4f}\n"
+        f"RSI: {last['rsi']:.1f}  |  DIF: {last['dif']:.4f}\n"
     )
 
+    # Sinyal geldiğinde mesajın sonuna sanal işlem bilgilerini ekliyoruz
     if latest_signal:
         emoji = "🔴 <b>SHORT SİNYAL</b>" if latest_signal == "SHORT" else "🟢 <b>LONG SİNYAL</b>"
-        caption += f"\n{emoji}\n{reason}"
+        trade_simulation = (
+            "\n\n🛠 <b>İşlem Özeti:</b>\n"
+            "💰 Pozisyon: $20 (İzole)\n"
+            "➕ Marjin Eklendi: $80\n"
+            "📊 Toplam Teminat: $100"
+        )
+        caption += f"\n{emoji}\n{reason}{trade_simulation}"
         print(f"  ★ {latest_signal} → {reason}")
     else:
-        print(f"  Sinyal yok | Fiyat: {last['close']:.2f} | Toplam işaret: {len(all_signals)}")
+        print(f"  Sinyal yok | Fiyat: {last['close']:.2f}")
 
     if SEND_CHART_EVERY_MINUTE or latest_signal:
         chart = create_chart(df, name, all_signals, latest_signal)
-        if send_telegram_photo(chart, caption):
-            print("  → Telegram'a gönderildi")
-        else:
-            print("  → Telegram gönderilemedi")
+        send_telegram_photo(chart, caption)
     elif latest_signal:
         send_telegram_message(caption)
 
 
+def send_startup_status():
+    # Başlangıçta sistemin çalıştığına dair ana mesajı atıyoruz
+    startup_msg = (
+        "✅ <b>Sistem Başarıyla Başlatıldı!</b>\n"
+        "📁 Dosya: <code>Macd.py</code>\n"
+        "💼 Cüzdan Değeri: <b>$300</b>\n"
+        "⏳ İlk piyasa grafikleri yükleniyor..."
+    )
+    send_telegram_message(startup_msg)
+    print("Başlangıç mesajı gönderildi. Grafikler hazırlanıyor...")
+
+    # Başlangıçta Altın ve Gümüş için anlık birer grafik oluşturup gönderiyoruz
+    for name, ticker in SYMBOLS.items():
+        df = get_data(ticker)
+        if df is not None:
+            df = calculate_indicators(df)
+            all_signals = find_all_signals(df)
+            chart = create_chart(df, name, all_signals, latest_signal=None)
+            caption = f"🚀 <b>{name} Açılış Durumu</b>\n(Sistem Takibe Başladı)"
+            send_telegram_photo(chart, caption)
+            time.sleep(2)  # Telegram'ı spamlememek için kısa bekleme
+
+
 def main():
     print("=" * 55)
-    print("  VADELİ ALTIN & GÜMÜŞ 1DK TAKİP BOTU + İŞARETLER")
-    print("  Ctrl+C ile durdurabilirsiniz")
+    print("  VADELİ ALTIN & GÜMÜŞ BOTU AKTİF")
     print("=" * 55)
 
-    send_telegram_message(
-        "🟢 <b>Vadeli Altın & Gümüş botu aktif!</b>\n"
-        "LONG ▲  ve  SHORT ▼  noktaları grafikte işaretleniyor."
-    )
+    # Sistemin çalıştığını kanıtlayan başlangıç fonksiyonunu çağırıyoruz
+    send_startup_status()
 
     while True:
         try:
@@ -278,7 +278,6 @@ def main():
             print("60 saniye bekleniyor...\n")
             time.sleep(60)
         except KeyboardInterrupt:
-            print("\nBot durduruldu.")
             send_telegram_message("🔴 Bot durduruldu.")
             break
         except Exception as e:
