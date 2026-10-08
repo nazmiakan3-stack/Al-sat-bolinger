@@ -1,3 +1,4 @@
+import sys
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
@@ -12,8 +13,14 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # ======================== AYARLAR ========================
-TELEGRAM_TOKEN = "BURAYA_BOT_TOKEN_YAZ"
-TELEGRAM_CHAT_ID = "BURAYA_CHAT_ID_YAZ"
+# Token ve Chat ID'yi komut satırı argümanlarından alıyoruz
+if len(sys.argv) > 2:
+    TELEGRAM_TOKEN = sys.argv[1]
+    TELEGRAM_CHAT_ID = sys.argv[2]
+else:
+    print("Hata: Token ve Chat ID eksik!")
+    print("Kullanım: python Macd.py <TOKEN> <CHAT_ID>")
+    sys.exit(1)
 
 SYMBOLS = {
     "ALTIN (GC=F)": "GC=F",
@@ -37,7 +44,11 @@ def send_telegram_photo(photo_bytes, caption=""):
     data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "HTML"}
     try:
         r = requests.post(url, files=files, data=data, timeout=30)
-        return r.status_code == 200
+        if r.status_code == 200:
+            return True
+        else:
+            print(f"  [!] Telegram API Hatası: {r.status_code} - {r.text}")
+            return False
     except Exception as e:
         print("Telegram fotoğraf hatası:", e)
         return False
@@ -47,7 +58,9 @@ def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
-        requests.post(url, data=data, timeout=15)
+        r = requests.post(url, data=data, timeout=15)
+        if r.status_code != 200:
+            print(f"  [!] Telegram Mesaj API Hatası: {r.status_code} - {r.text}")
     except Exception as e:
         print("Telegram mesaj hatası:", e)
 
@@ -79,10 +92,6 @@ def calculate_indicators(df):
 
 
 def find_all_signals(df):
-    """
-    Geçmiş tüm LONG ve SHORT noktalarını bulur.
-    Dönen: list of (index, 'LONG'/'SHORT')
-    """
     signals = []
     if len(df) < VOLUME_LOOKBACK + 5:
         return signals
@@ -106,7 +115,6 @@ def find_all_signals(df):
 
 
 def check_latest_signal(df):
-    """Sadece en son mumu kontrol eder (mesaj için)"""
     signals = find_all_signals(df)
     if not signals:
         return None, ""
@@ -136,14 +144,12 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
         for spine in ax.spines.values():
             spine.set_color("#333333")
 
-    # ----- Fiyat + EMA -----
     ax_price.plot(df.index, df["close"], color="#00d4ff", linewidth=1.6, label="Fiyat", zorder=2)
     ema_colors = ["#ffd700", "#ff6b6b", "#4ecdc4"]
     for i, p in enumerate(EMA_PERIODS):
         ax_price.plot(df.index, df[f"ema_{p}"], color=ema_colors[i],
                       linewidth=1.2, label=f"EMA {p}", alpha=0.9, zorder=2)
 
-    # ----- LONG / SHORT işaretleri -----
     for idx, sig_type in all_signals:
         price = df.loc[idx, "close"]
         if sig_type == "LONG":
@@ -153,7 +159,6 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
             ax_price.scatter(idx, price, marker="v", color="#ff4444", s=120,
                              zorder=5, edgecolors="white", linewidths=0.8, label="_nolegend_")
 
-    # En son sinyal büyük vurgulu
     if latest_signal:
         color = "#ff4444" if latest_signal == "SHORT" else "#00ff99"
         ax_price.annotate(
@@ -165,7 +170,6 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
             zorder=6
         )
 
-    # Legend'e manuel ekleme
     from matplotlib.lines import Line2D
     legend_elements = [
         Line2D([0], [0], color="#00d4ff", lw=1.6, label="Fiyat"),
@@ -186,12 +190,10 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
         color="white", fontsize=13, pad=8
     )
 
-    # ----- Hacim -----
     vol_colors = ["#26a69a" if c >= o else "#ef5350" for c, o in zip(df["close"], df["open"])]
     ax_vol.bar(df.index, df["volume"], color=vol_colors, width=0.0007, alpha=0.85)
     ax_vol.set_ylabel("Hacim", color="#cccccc")
 
-    # ----- RSI -----
     ax_rsi.plot(df.index, df["rsi"], color="#e040fb", linewidth=1.4)
     ax_rsi.axhline(70, color="#ef5350", linestyle="--", alpha=0.7)
     ax_rsi.axhline(30, color="#26a69a", linestyle="--", alpha=0.7)
@@ -201,7 +203,6 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
     ax_rsi.fill_between(df.index, 70, 100, color="#ef5350", alpha=0.08)
     ax_rsi.fill_between(df.index, 0, 30, color="#26a69a", alpha=0.08)
 
-    # ----- MACD -----
     ax_macd.plot(df.index, df["dif"], color="#00bcd4", linewidth=1.3, label="DIF")
     ax_macd.plot(df.index, df["dea"], color="#ff9800", linewidth=1.3, label="DEA")
     hist_colors = ["#26a69a" if h >= 0 else "#ef5350" for h in df["hist"]]
