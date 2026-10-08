@@ -1,29 +1,47 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Vadeli Altın & Gümüş Botu (Macd.py) - Entegre Sürüm
+- Çevre değişkenlerinden (Environment) güvenli Telegram Token ve Chat ID okuma
+- 1 dakikalık veri ile MACD, RSI, EMA ve Hacim takibi
+- Otomatik grafik oluşturma ve Telegram'a fotoğraf/mesaj gönderimi
+"""
+
+import os
+import io
 import sys
-import yfinance as yf
+import time
+import requests
+import warnings
+from datetime import datetime
 import pandas as pd
 import pandas_ta as ta
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.gridspec import GridSpec
-import io
-import time
-import requests
-from datetime import datetime
-import warnings
 
 # Hata mesajlarını gizle
 warnings.filterwarnings("ignore")
 
-# ======================== AYARLAR ========================
-# Token ve Chat ID'yi dışarıdan (sys.argv) alıyoruz
-if len(sys.argv) > 2:
+# ======================== TELEGRAM AYARLARI ========================
+# Önce environment değişkenlerine bakar, yoksa komut satırından (sys.argv) alır
+TELEGRAM_TOKEN = (
+    os.environ.get("TELEGRAM_TOKEN")
+    or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+)
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+if not TELEGRAM_TOKEN and len(sys.argv) > 1:
     TELEGRAM_TOKEN = sys.argv[1]
+if not TELEGRAM_CHAT_ID and len(sys.argv) > 2:
     TELEGRAM_CHAT_ID = sys.argv[2]
-else:
-    print("Hata: Token ve Chat ID eksik!")
-    print("Kullanım: python Macd.py <TOKEN> <CHAT_ID>")
+
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    print("[!] Hata: Telegram Token veya Chat ID eksik!")
+    print("Kullanım: python3 Macd.py <TOKEN> <CHAT_ID> veya environment değişkeni tanımlayın.")
     sys.exit(1)
 
+# ======================== DİĞER AYARLAR ========================
 SYMBOLS = {
     "ALTIN (GC=F)": "GC=F",
     "GUMUS (SI=F)": "SI=F"
@@ -35,10 +53,12 @@ VOLUME_LOOKBACK = 20
 EMA_PERIODS = [9, 21, 50]
 RSI_PERIOD = 14
 MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
-
 SEND_CHART_EVERY_MINUTE = True
-# ========================================================
 
+WALLET_VALUE = 300.0
+MARGIN = 80.0
+POSITION = 20.0
+# =================================================================
 
 def send_telegram_photo(photo_bytes, caption=""):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -55,7 +75,6 @@ def send_telegram_photo(photo_bytes, caption=""):
         print("Telegram fotoğraf hatası:", e)
         return False
 
-
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
@@ -65,7 +84,6 @@ def send_telegram_message(text):
             print(f"  [!] Telegram Mesaj API Hatası: {r.status_code} - {r.text}")
     except Exception as e:
         print("Telegram mesaj hatası:", e)
-
 
 def get_data(ticker):
     try:
@@ -81,7 +99,6 @@ def get_data(ticker):
         print(f"Veri çekme hatası ({ticker}):", e)
         return None
 
-
 def calculate_indicators(df):
     for p in EMA_PERIODS:
         df[f"ema_{p}"] = ta.ema(df["close"], length=p)
@@ -91,7 +108,6 @@ def calculate_indicators(df):
     df["dea"] = macd[f"MACDs_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}"]
     df["hist"] = macd[f"MACDh_{MACD_FAST}_{MACD_SLOW}_{MACD_SIGNAL}"]
     return df.dropna()
-
 
 def find_all_signals(df):
     signals = []
@@ -112,7 +128,6 @@ def find_all_signals(df):
 
     return signals
 
-
 def check_latest_signal(df):
     signals = find_all_signals(df)
     if not signals:
@@ -126,7 +141,6 @@ def check_latest_signal(df):
             reason = f"DEA negatif ({last['dea']:.4f}) + Hacim en düşük"
         return last_type, reason
     return None, ""
-
 
 def create_chart(df, symbol_name, all_signals, latest_signal=None):
     fig = plt.figure(figsize=(14, 11), facecolor="#121212")
@@ -203,7 +217,6 @@ def create_chart(df, symbol_name, all_signals, latest_signal=None):
     plt.close(fig)
     return buf
 
-
 def process_symbol(name, ticker):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {name} kontrol ediliyor...")
     df = get_data(ticker)
@@ -221,14 +234,13 @@ def process_symbol(name, ticker):
         f"RSI: {last['rsi']:.1f}  |  DIF: {last['dif']:.4f}\n"
     )
 
-    # Sinyal geldiğinde mesajın sonuna sanal işlem bilgilerini ekliyoruz
     if latest_signal:
         emoji = "🔴 <b>SHORT SİNYAL</b>" if latest_signal == "SHORT" else "🟢 <b>LONG SİNYAL</b>"
         trade_simulation = (
-            "\n\n🛠 <b>İşlem Özeti:</b>\n"
-            "💰 Pozisyon: $20 (İzole)\n"
-            "➕ Marjin Eklendi: $80\n"
-            "📊 Toplam Teminat: $100"
+            f"\n\n🛠 <b>İşlem Özeti:</b>\n"
+            f"💼 Cüzdan: ${WALLET_VALUE:.2f}\n"
+            f"⚙️ Pozisyon: ${POSITION:.2f} (İzole)\n"
+            f"➕ Marjin Eklendi: ${MARGIN:.2f}"
         )
         caption += f"\n{emoji}\n{reason}{trade_simulation}"
         print(f"  ★ {latest_signal} → {reason}")
@@ -241,19 +253,16 @@ def process_symbol(name, ticker):
     elif latest_signal:
         send_telegram_message(caption)
 
-
 def send_startup_status():
-    # Başlangıçta sistemin çalıştığına dair ana mesajı atıyoruz
     startup_msg = (
         "✅ <b>Sistem Başarıyla Başlatıldı!</b>\n"
-        "📁 Dosya: <code>Macd.py</code>\n"
-        "💼 Cüzdan Değeri: <b>$300</b>\n"
+        f"📁 Dosya: <code>{os.path.basename(__file__)}</code>\n"
+        f"💼 Cüzdan Değeri: <b>${WALLET_VALUE:.2f}</b>\n"
         "⏳ İlk piyasa grafikleri yükleniyor..."
     )
     send_telegram_message(startup_msg)
     print("Başlangıç mesajı gönderildi. Grafikler hazırlanıyor...")
 
-    # Başlangıçta Altın ve Gümüş için anlık birer grafik oluşturup gönderiyoruz
     for name, ticker in SYMBOLS.items():
         df = get_data(ticker)
         if df is not None:
@@ -262,15 +271,13 @@ def send_startup_status():
             chart = create_chart(df, name, all_signals, latest_signal=None)
             caption = f"🚀 <b>{name} Açılış Durumu</b>\n(Sistem Takibe Başladı)"
             send_telegram_photo(chart, caption)
-            time.sleep(2)  # Telegram'ı spamlememek için kısa bekleme
-
+            time.sleep(2)
 
 def main():
     print("=" * 55)
     print("  VADELİ ALTIN & GÜMÜŞ BOTU AKTİF")
     print("=" * 55)
 
-    # Sistemin çalıştığını kanıtlayan başlangıç fonksiyonunu çağırıyoruz
     send_startup_status()
 
     while True:
@@ -286,7 +293,6 @@ def main():
         except Exception as e:
             print("Genel hata:", e)
             time.sleep(20)
-
 
 if __name__ == "__main__":
     main()
