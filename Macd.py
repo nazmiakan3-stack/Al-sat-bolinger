@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Vadeli Altın & Gümüş Botu (Macd.py) - Güncellenmiş Sürüm
-- Sabit Telegram Token ve Chat ID desteği (Hata önleyici)
+Vadeli Altın & Gümüş Botu (Macd.py) - Tam ve Kesintisiz Sürüm
+- Sabit Telegram Token ve Chat ID (Hata önleyici doğrudan tanımlama)
 - 1 dakikalık veri ile MACD, RSI, EMA ve Hacim takibi
 - Otomatik grafik oluşturma ve Telegram'a fotoğraf/mesaj gönderimi
 """
@@ -24,15 +24,9 @@ from matplotlib.gridspec import GridSpec
 warnings.filterwarnings("ignore")
 
 # ======================== TELEGRAM AYARLARI ========================
-# Doğrudan sabit token ve chat ID (Terminalden argüman zorunluluğu kalktı)
+# Token ve Chat ID doğrudan sabitlenmiştir, ek argümana gerek yoktur.
 TELEGRAM_TOKEN = "8680932537:AAHcV1npqk0H0MunNdvfchlurdE0fEaCgw4"
 TELEGRAM_CHAT_ID = "1734551753"
-
-# Eğer terminalden ekstra argüman verilirse onları da dikkate alması için
-if len(sys.argv) > 1 and sys.argv[1]:
-    TELEGRAM_TOKEN = sys.argv[1]
-if len(sys.argv) > 2 and sys.argv[2]:
-    TELEGRAM_CHAT_ID = sys.argv[2]
 # =================================================================
 
 # ======================== DİĞER AYARLAR ========================
