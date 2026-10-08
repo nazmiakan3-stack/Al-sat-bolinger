@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Vadeli Altın & Gümüş Botu (Macd.py) - Entegre Sürüm
-- Çevre değişkenlerinden (Environment) güvenli Telegram Token ve Chat ID okuma
+Vadeli Altın & Gümüş Botu (Macd.py) - Güncellenmiş Sürüm
+- Sabit Telegram Token ve Chat ID desteği (Hata önleyici)
 - 1 dakikalık veri ile MACD, RSI, EMA ve Hacim takibi
 - Otomatik grafik oluşturma ve Telegram'a fotoğraf/mesaj gönderimi
 """
@@ -24,22 +24,16 @@ from matplotlib.gridspec import GridSpec
 warnings.filterwarnings("ignore")
 
 # ======================== TELEGRAM AYARLARI ========================
-# Önce environment değişkenlerine bakar, yoksa komut satırından (sys.argv) alır
-TELEGRAM_TOKEN = (
-    os.environ.get("TELEGRAM_TOKEN")
-    or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-)
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+# Doğrudan sabit token ve chat ID (Terminalden argüman zorunluluğu kalktı)
+TELEGRAM_TOKEN = "8680932537:AAHcV1npqk0H0MunNdvfchlurdE0fEaCgw4"
+TELEGRAM_CHAT_ID = "1734551753"
 
-if not TELEGRAM_TOKEN and len(sys.argv) > 1:
+# Eğer terminalden ekstra argüman verilirse onları da dikkate alması için
+if len(sys.argv) > 1 and sys.argv[1]:
     TELEGRAM_TOKEN = sys.argv[1]
-if not TELEGRAM_CHAT_ID and len(sys.argv) > 2:
+if len(sys.argv) > 2 and sys.argv[2]:
     TELEGRAM_CHAT_ID = sys.argv[2]
-
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    print("[!] Hata: Telegram Token veya Chat ID eksik!")
-    print("Kullanım: python3 Macd.py <TOKEN> <CHAT_ID> veya environment değişkeni tanımlayın.")
-    sys.exit(1)
+# =================================================================
 
 # ======================== DİĞER AYARLAR ========================
 SYMBOLS = {
