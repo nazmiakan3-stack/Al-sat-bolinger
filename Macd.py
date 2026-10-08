@@ -10,9 +10,12 @@ import time
 import requests
 from datetime import datetime
 import warnings
+
+# Hata mesajlarını gizle
 warnings.filterwarnings("ignore")
 
 # ======================== AYARLAR ========================
+# Token ve Chat ID'yi dışarıdan (sys.argv) alıyoruz
 if len(sys.argv) > 2:
     TELEGRAM_TOKEN = sys.argv[1]
     TELEGRAM_CHAT_ID = sys.argv[2]
